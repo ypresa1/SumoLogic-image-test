@@ -1,22 +1,18 @@
-FROM golang:1.16.5 as builder
+FROM golang:1.16.5 as go-builder
+RUN mkdir /build
+ADD ./out_gstdout /build/
+WORKDIR /build
+RUN make all
 
-WORKDIR /workspace
+FROM fluent/fluent-bit:1.7.8
+ENV LOG_LEVEL=warning
 
-# Copy the go source
-COPY . .
+COPY --from=go-builder \
+  /build/out_gstdout.so \
+  /tailing-sidecar/lib/
 
-# cache deps before building and copying source so that we don't need to re-download as much
-# and so that source changes don't invalidate our downloaded layer
-RUN go mod download
+COPY conf/fluent-bit.conf \
+  conf/plugins.conf \
+  /fluent-bit/etc/
 
-# Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -o manager main.go
-
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
-WORKDIR /
-COPY --from=builder /workspace/manager .
-USER nonroot:nonroot
-
-ENTRYPOINT ["/manager"]
+CMD ["/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/fluent-bit.conf", "--quiet"]
